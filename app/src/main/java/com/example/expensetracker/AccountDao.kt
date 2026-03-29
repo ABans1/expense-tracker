@@ -11,8 +11,11 @@ interface AccountDao {
     @Query("SELECT * FROM accounts ORDER BY account_name ASC")
     fun getAllAccounts(): Flow<List<Account>>
 
+    @Query("SELECT * FROM accounts")
+    suspend fun getAllAccountsList(): List<Account>
+
     @Insert
-    suspend fun insert(account: Account)
+    suspend fun insert(account: Account): Long
 
     @Delete
     suspend fun delete(account: Account)

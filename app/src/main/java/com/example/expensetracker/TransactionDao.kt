@@ -12,6 +12,9 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE account_id = :accountId ORDER BY date DESC, time DESC")
     fun getTransactionsForAccount(accountId: Int): Flow<List<Transaction>>
 
+    @Query("SELECT * FROM transactions WHERE account_id = :accountId")
+    suspend fun getTransactionsForAccountList(accountId: Int): List<Transaction>
+
     @Insert
     suspend fun insert(transaction: Transaction)
 
@@ -20,4 +23,7 @@ interface TransactionDao {
 
     @Update
     suspend fun update(transaction: Transaction)
+
+    @Query("DELETE FROM transactions WHERE account_id = :accountId")
+    suspend fun deleteTransactionsForAccount(accountId: Int)
 }

@@ -2,6 +2,7 @@ package com.example.expensetracker
 
 import android.app.Application
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -32,9 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import kotlinx.coroutines.launch
-import java.io.BufferedReader
 import java.io.IOException
-import java.io.InputStreamReader
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -60,6 +59,10 @@ fun TransactionScreen(
     val categories by categoryViewModel.getCategories(accountId).collectAsState(initial = emptyList())
     val accounts by accountViewModel.accounts.collectAsState()
     val balance by transactionViewModel.getAccountBalance(accountId).collectAsState(initial = 0.0)
+    
+    val currentAccount = accounts.find { it.id == accountId }
+    val accountName = currentAccount?.name ?: "transactions"
+    val csvFileName = "ExpenseTracker ${accountName}.csv"
 
     val selectedCategory by transactionViewModel.selectedCategory.collectAsState()
     val startDate by transactionViewModel.startDate.collectAsState()
@@ -81,9 +84,10 @@ fun TransactionScreen(
                     context.contentResolver.openOutputStream(it)?.use { outputStream ->
                         val csvContent = generateCsvContent(transactions, categories)
                         outputStream.write(csvContent.toByteArray())
+                        Toast.makeText(context, "Export Successful", Toast.LENGTH_SHORT).show()
                     }
                 } catch (e: IOException) {
-                    // Handle error
+                    Toast.makeText(context, "Export Failed", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -97,9 +101,10 @@ fun TransactionScreen(
                     try {
                         context.contentResolver.openInputStream(it)?.use { inputStream ->
                             parseAndImportCsv(inputStream, accountId, categoryViewModel, transactionViewModel)
+                            Toast.makeText(context, "Import Successful", Toast.LENGTH_SHORT).show()
                         }
                     } catch (e: IOException) {
-                        // Handle error
+                        Toast.makeText(context, "Import Failed", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -132,14 +137,16 @@ fun TransactionScreen(
                 }
                 Spacer(modifier = Modifier.padding(start = 8.dp))
                 Button(onClick = { 
-                    createFileLauncher.launch("transactions.csv")
+                    createFileLauncher.launch(csvFileName)
                 }) {
                     Text("Export")
                 }
             }
+            
             Spacer(modifier = Modifier.height(16.dp))
+            
             Text(
-                text = "Transactions",
+                text = "Transactions: ${currentAccount?.name ?: ""}",
                 style = MaterialTheme.typography.headlineMedium
             )
             Text(
@@ -232,64 +239,6 @@ fun TransactionScreen(
                         movingTransaction = null
                     }
                 )
-            }
-        }
-    }
-}
-
-fun generateCsvContent(transactions: List<Transaction>, categories: List<Category>): String {
-    val header = "Date,Time,Remark,Category,Mode,Cash In,Cash Out"
-    val rows = transactions.map { transaction ->
-        val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(transaction.date)
-        val time = transaction.time
-        val remark = transaction.remark.let { if (it.contains(",")) "\"$it\"" else it }
-        val categoryName = categories.find { it.id == transaction.categoryId }?.name?.let { if (it.contains(",")) "\"$it\"" else it } ?: "N/A"
-        val mode = transaction.mode.let { if (it.contains(",")) "\"$it\"" else it }
-        val cashIn = transaction.cashIn.toString()
-        val cashOut = transaction.cashOut.toString()
-        "$date,$time,$remark,$categoryName,$mode,$cashIn,$cashOut"
-    }
-    return (listOf(header) + rows).joinToString("\n")
-}
-
-suspend fun parseAndImportCsv(inputStream: java.io.InputStream, accountId: Int, categoryViewModel: CategoryViewModel, transactionViewModel: TransactionViewModel) {
-    BufferedReader(InputStreamReader(inputStream)).useLines { lines ->
-        val lineIterator = lines.iterator()
-        if (!lineIterator.hasNext()) return@useLines
-
-        val headerMap = lineIterator.next().split(",").mapIndexed { index, s -> s.trim().removeSurrounding("\"") to index }.toMap()
-
-        while (lineIterator.hasNext()) {
-            val line = lineIterator.next()
-            val tokens = line.split(",").toMutableList()
-
-            for(i in tokens.indices){
-                tokens[i] = tokens[i].removeSurrounding("\"")
-            }
-
-            try {
-                val date = headerMap["Date"]?.let { index -> tokens.getOrNull(index)?.let { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(it) } } ?: Date()
-                val time = headerMap["Time"]?.let { index -> tokens.getOrNull(index) } ?: ""
-                val remark = headerMap["Remark"]?.let { index -> tokens.getOrNull(index)?.removeSurrounding("\"") } ?: ""
-                val categoryName = headerMap["Category"]?.let { index -> tokens.getOrNull(index) } ?: ""
-                val categoryId = if (categoryName.isNotEmpty()) categoryViewModel.getOrCreateCategory(accountId, categoryName).toInt() else null
-                val mode = headerMap["Mode"]?.let { index -> tokens.getOrNull(index) } ?: ""
-                val cashIn = headerMap["Cash In"]?.let { index -> tokens.getOrNull(index)?.toDoubleOrNull() } ?: 0.0
-                val cashOut = headerMap["Cash Out"]?.let { index -> tokens.getOrNull(index)?.toDoubleOrNull() } ?: 0.0
-
-                val newTransaction = Transaction(
-                    accountId = accountId,
-                    categoryId = categoryId,
-                    date = date,
-                    time = time,
-                    remark = remark,
-                    mode = mode,
-                    cashIn = cashIn,
-                    cashOut = cashOut
-                )
-                transactionViewModel.addTransaction(newTransaction)
-            } catch (e: Exception) {
-                // Handle parsing error for a line
             }
         }
     }

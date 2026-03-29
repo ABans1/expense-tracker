@@ -22,9 +22,17 @@ class AccountViewModel(private val accountDao: AccountDao) : ViewModel() {
         }
     }
 
+    suspend fun addAccountAndGetId(name: String): Int {
+        return accountDao.insert(Account(name = name)).toInt()
+    }
+
     fun deleteAccount(account: Account) {
         viewModelScope.launch {
             accountDao.delete(account)
         }
+    }
+
+    suspend fun getAllAccounts(): List<Account> {
+        return accountDao.getAllAccountsList()
     }
 }

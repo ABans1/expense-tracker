@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.Keep
@@ -16,27 +18,39 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.example.expensetracker.services.GoogleDriveService
+import com.google.android.gms.common.api.ApiException
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import java.io.ByteArrayInputStream
 
 @Keep
 @Composable
@@ -47,9 +61,21 @@ fun AccountScreen(
     val accountViewModel: AccountViewModel = viewModel(
         factory = ViewModelFactory(application)
     )
+    val transactionViewModel: TransactionViewModel = viewModel(
+        factory = ViewModelFactory(application)
+    )
+    val categoryViewModel: CategoryViewModel = viewModel(
+        factory = ViewModelFactory(application)
+    )
+    
     val accounts by accountViewModel.accounts.collectAsState()
     var newAccountName by remember { mutableStateOf("") }
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    
+    val googleDriveService = remember { GoogleDriveService(context) }
+    var googleSignInAccount by remember { mutableStateOf(googleDriveService.getLastSignedInAccount()) }
+
     var hasSmsPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -58,6 +84,35 @@ fun AccountScreen(
             ) == PackageManager.PERMISSION_GRANTED
         )
     }
+    
+    val googleSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+        onResult = { result ->
+            val data = result.data
+            googleDriveService.handleSignInResult(
+                data = data,
+                onSignedIn = { account ->
+                    googleSignInAccount = account
+                    coroutineScope.launch {
+                        try {
+                            autoRestore(googleDriveService, accountViewModel, transactionViewModel, categoryViewModel)
+                            Toast.makeText(context, "Cloud Restore Successful", Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) {
+                            Log.e("AccountScreen", "Cloud Restore Failed", e)
+                            Toast.makeText(context, "Cloud Restore Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                },
+                onError = { e ->
+                    val statusCode = (e as? ApiException)?.statusCode
+                    val errorMessage = "Sign in failed. Code: $statusCode. Message: ${e.localizedMessage}"
+                    Log.e("AccountScreen", errorMessage)
+                    Toast.makeText(context, errorMessage, Toast.LENGTH_LONG).show()
+                }
+            )
+        }
+    )
+    
     val smsPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
         onResult = { isGranted ->
@@ -87,7 +142,76 @@ fun AccountScreen(
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.padding(bottom = 16.dp)
         )
-        Text("Enable SMS reading to automatically add transactions from your bank messages.")
+        
+        // Cloud Status Banner
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = if (googleSignInAccount != null) Color(0xFFE8F5E9) else Color(0xFFFFF3E0),
+            modifier = Modifier.padding(bottom = 8.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (googleSignInAccount != null) Icons.Default.CloudDone else Icons.Default.CloudUpload,
+                    contentDescription = null,
+                    tint = if (googleSignInAccount != null) Color(0xFF2E7D32) else Color(0xFFEF6C00),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.padding(horizontal = 4.dp))
+                Text(
+                    text = if (googleSignInAccount != null) "Cloud Sync Active" else "Cloud Backup Off",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (googleSignInAccount != null) Color(0xFF2E7D32) else Color(0xFFEF6C00)
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (googleSignInAccount == null) {
+                Button(
+                    onClick = { googleSignInLauncher.launch(googleDriveService.getSignInIntent()) },
+                    modifier = Modifier.padding(bottom = 16.dp)
+                ) {
+                    Text("Sign In with Google")
+                }
+            } else {
+                Column(modifier = Modifier.padding(bottom = 16.dp)) {
+                    Text(
+                        text = "Signed in as ${googleSignInAccount?.displayName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Row {
+                        Button(onClick = {
+                            coroutineScope.launch {
+                                try {
+                                    autoBackup(googleDriveService, accountViewModel, transactionViewModel, categoryViewModel)
+                                    Toast.makeText(context, "Sync Successful", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    Log.e("AccountScreen", "Sync Failed", e)
+                                    Toast.makeText(context, "Sync Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }) {
+                            Text("Sync")
+                        }
+                        Spacer(modifier = Modifier.padding(horizontal = 4.dp))
+                        Button(onClick = {
+                            googleDriveService.signOut()
+                            googleSignInAccount = null
+                        }) {
+                            Text("Sign Out")
+                        }
+                    }
+                }
+            }
+        }
+
         if (hasSmsPermission) {
             Button(onClick = {
                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
@@ -101,7 +225,9 @@ fun AccountScreen(
                 Text("Enable SMS Reading")
             }
         }
+        
         Spacer(modifier = Modifier.height(16.dp))
+
         LazyColumn(modifier = Modifier.weight(1f)) {
             items(accounts) { account ->
                 Row(modifier = Modifier.fillMaxWidth()) {
@@ -139,6 +265,54 @@ fun AccountScreen(
                 enabled = newAccountName.isNotBlank()
             ) {
                 Text("Add")
+            }
+        }
+    }
+}
+
+suspend fun autoBackup(
+    googleDriveService: GoogleDriveService,
+    accountViewModel: AccountViewModel,
+    transactionViewModel: TransactionViewModel,
+    categoryViewModel: CategoryViewModel
+) {
+    val accounts = accountViewModel.getAllAccounts()
+    for (account in accounts) {
+        val transactions = transactionViewModel.getAllTransactions(account.id)
+        val categories = categoryViewModel.getCategories(account.id).first()
+        val csvContent = generateCsvContent(transactions, categories)
+        // Match the export utility filename: "ExpenseTracker <Name>.csv"
+        googleDriveService.uploadCsvFile("ExpenseTracker ${account.name}.csv", csvContent)
+    }
+}
+
+suspend fun autoRestore(
+    googleDriveService: GoogleDriveService,
+    accountViewModel: AccountViewModel,
+    transactionViewModel: TransactionViewModel,
+    categoryViewModel: CategoryViewModel
+) {
+    val driveFiles = googleDriveService.listCsvFiles()
+    val localAccounts = accountViewModel.getAllAccounts()
+    
+    for (file in driveFiles) {
+        // Match both space and underscore separators for compatibility
+        if (file.first.startsWith("ExpenseTracker ") || file.first.startsWith("ExpenseTracker_")) {
+            val accountName = file.first
+                .removePrefix("ExpenseTracker ")
+                .removePrefix("ExpenseTracker_")
+                .removeSuffix(".csv")
+            
+            // Find or create account
+            val existingAccount = localAccounts.find { it.name == accountName }
+            val accountId = existingAccount?.id ?: accountViewModel.addAccountAndGetId(accountName)
+            
+            val content = googleDriveService.downloadFile(file.second)
+            content?.let { csvString ->
+                // Clear existing transactions before importing for full override effect
+                transactionViewModel.clearTransactionsForAccount(accountId)
+                // Use the unified logic from CsvUtils.kt
+                parseAndImportCsv(ByteArrayInputStream(csvString.toByteArray()), accountId, categoryViewModel, transactionViewModel)
             }
         }
     }

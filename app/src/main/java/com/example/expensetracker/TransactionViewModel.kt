@@ -27,9 +27,6 @@ class TransactionViewModel(private val transactionDao: TransactionDao) : ViewMod
     private val _amountFilter = MutableStateFlow<Double?>(null)
     val amountFilter = _amountFilter.asStateFlow()
 
-    private val _modeFilter = MutableStateFlow<String?>(null)
-    val modeFilter = _modeFilter.asStateFlow()
-
     fun getTransactions(accountId: Int): Flow<List<Transaction>> {
         return transactionDao.getTransactionsForAccount(accountId)
             .combine(_selectedCategory) { transactions, category ->
@@ -46,9 +43,6 @@ class TransactionViewModel(private val transactionDao: TransactionDao) : ViewMod
             }
             .combine(_amountFilter) { transactions, amount ->
                 if (amount == null) transactions else transactions.filter { it.cashIn == amount || it.cashOut == amount }
-            }
-            .combine(_modeFilter) { transactions, mode ->
-                if (mode.isNullOrEmpty()) transactions else transactions.filter { it.mode.equals(mode, ignoreCase = true) }
             }
     }
 
@@ -75,23 +69,22 @@ class TransactionViewModel(private val transactionDao: TransactionDao) : ViewMod
         _amountFilter.value = amount
     }
 
-    fun setModeFilter(mode: String?) {
-        _modeFilter.value = mode
-    }
-
     fun clearFilters() {
         _selectedCategory.value = null
         _startDate.value = null
         _endDate.value = null
         _remarkFilter.value = null
         _amountFilter.value = null
-        _modeFilter.value = null
     }
 
     fun addTransaction(transaction: Transaction) {
         viewModelScope.launch {
             transactionDao.insert(transaction)
         }
+    }
+
+    suspend fun addTransactionSync(transaction: Transaction) {
+        transactionDao.insert(transaction)
     }
 
     fun deleteTransaction(transaction: Transaction) {
@@ -110,5 +103,13 @@ class TransactionViewModel(private val transactionDao: TransactionDao) : ViewMod
         viewModelScope.launch {
             updateTransaction(transaction.copy(accountId = newAccountId))
         }
+    }
+
+    suspend fun getAllTransactions(accountId: Int): List<Transaction> {
+        return transactionDao.getTransactionsForAccountList(accountId)
+    }
+
+    suspend fun clearTransactionsForAccount(accountId: Int) {
+        transactionDao.deleteTransactionsForAccount(accountId)
     }
 }

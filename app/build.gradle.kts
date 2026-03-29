@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -7,8 +10,21 @@ plugins {
 
 android {
     namespace = "com.example.expensetracker"
-    compileSdk {
-        version = release(36)
+    compileSdk = 36
+
+    val keystorePropertiesFile = rootProject.file("local.properties")
+    val keystoreProperties = Properties()
+    if (keystorePropertiesFile.exists()) {
+        keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file("/Users/anmol.bansal/my-repos/App_Key.jks")
+            storePassword = keystoreProperties["RELEASE_STORE_PASSWORD"] as String?
+            keyAlias = keystoreProperties["RELEASE_KEY_ALIAS"] as String?
+            keyPassword = keystoreProperties["RELEASE_KEY_PASSWORD"] as String?
+        }
     }
 
     defaultConfig {
@@ -23,6 +39,7 @@ android {
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -39,6 +56,11 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1,DEPENDENCIES}"
+        }
     }
 }
 
@@ -57,6 +79,10 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     kapt(libs.androidx.room.compiler)
     implementation(libs.androidx.material.icons.extended)
+    implementation(libs.play.services.auth)
+    implementation(libs.google.api.client.android)
+    implementation(libs.google.api.services.drive)
+    implementation(libs.google.http.client.gson)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
