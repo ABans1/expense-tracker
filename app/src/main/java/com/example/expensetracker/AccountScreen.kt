@@ -27,13 +27,7 @@ import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,6 +69,7 @@ fun AccountScreen(
     
     val googleDriveService = remember { GoogleDriveService(context) }
     var googleSignInAccount by remember { mutableStateOf(googleDriveService.getLastSignedInAccount()) }
+    var isSyncing by remember { mutableStateOf(false) }
 
     var hasSmsPermission by remember {
         mutableStateOf(
@@ -94,12 +89,15 @@ fun AccountScreen(
                 onSignedIn = { account ->
                     googleSignInAccount = account
                     coroutineScope.launch {
+                        isSyncing = true
                         try {
                             autoRestore(googleDriveService, accountViewModel, transactionViewModel, categoryViewModel)
                             Toast.makeText(context, "Cloud Restore Successful", Toast.LENGTH_SHORT).show()
                         } catch (e: Exception) {
                             Log.e("AccountScreen", "Cloud Restore Failed", e)
                             Toast.makeText(context, "Cloud Restore Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                        } finally {
+                            isSyncing = false
                         }
                     }
                 },
@@ -186,15 +184,18 @@ fun AccountScreen(
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
-                    Row {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(onClick = {
                             coroutineScope.launch {
+                                isSyncing = true
                                 try {
                                     autoBackup(googleDriveService, accountViewModel, transactionViewModel, categoryViewModel)
                                     Toast.makeText(context, "Sync Successful", Toast.LENGTH_SHORT).show()
                                 } catch (e: Exception) {
                                     Log.e("AccountScreen", "Sync Failed", e)
                                     Toast.makeText(context, "Sync Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                } finally {
+                                    isSyncing = false
                                 }
                             }
                         }) {
@@ -206,6 +207,13 @@ fun AccountScreen(
                             googleSignInAccount = null
                         }) {
                             Text("Sign Out")
+                        }
+                        if (isSyncing) {
+                            Spacer(modifier = Modifier.padding(horizontal = 8.dp))
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp
+                            )
                         }
                     }
                 }
@@ -281,7 +289,6 @@ suspend fun autoBackup(
         val transactions = transactionViewModel.getAllTransactions(account.id)
         val categories = categoryViewModel.getCategories(account.id).first()
         val csvContent = generateCsvContent(transactions, categories)
-        // Match the export utility filename: "ExpenseTracker <Name>.csv"
         googleDriveService.uploadCsvFile("ExpenseTracker ${account.name}.csv", csvContent)
     }
 }
@@ -292,28 +299,27 @@ suspend fun autoRestore(
     transactionViewModel: TransactionViewModel,
     categoryViewModel: CategoryViewModel
 ) {
+    // 1. Get all CSV files from Drive and deduplicate by name (keeping only the latest version)
     val driveFiles = googleDriveService.listCsvFiles()
-    val localAccounts = accountViewModel.getAllAccounts()
-    
-    for (file in driveFiles) {
-        // Match both space and underscore separators for compatibility
-        if (file.first.startsWith("ExpenseTracker ") || file.first.startsWith("ExpenseTracker_")) {
-            val accountName = file.first
-                .removePrefix("ExpenseTracker ")
-                .removePrefix("ExpenseTracker_")
-                .removeSuffix(".csv")
-            
-            // Find or create account
-            val existingAccount = localAccounts.find { it.name == accountName }
-            val accountId = existingAccount?.id ?: accountViewModel.addAccountAndGetId(accountName)
-            
-            val content = googleDriveService.downloadFile(file.second)
-            content?.let { csvString ->
-                // Clear existing transactions before importing for full override effect
-                transactionViewModel.clearTransactionsForAccount(accountId)
-                // Use the unified logic from CsvUtils.kt
-                parseAndImportCsv(ByteArrayInputStream(csvString.toByteArray()), accountId, categoryViewModel, transactionViewModel)
-            }
+        .filter { it.first.startsWith("ExpenseTracker ") }
+        .associateBy({ it.first }, { it.second }) // associates name to ID, duplicates naturally overwrite to the last one seen
+
+    for ((fileName, fileId) in driveFiles) {
+        val accountName = fileName
+            .removePrefix("ExpenseTracker ")
+            .removeSuffix(".csv")
+        
+        // 2. Fetch fresh local accounts inside the loop to prevent race conditions/duplicates
+        val localAccounts = accountViewModel.getAllAccounts()
+        val existingAccount = localAccounts.find { it.name == accountName }
+        
+        val accountId = existingAccount?.id ?: accountViewModel.addAccountAndGetId(accountName)
+        
+        val content = googleDriveService.downloadFile(fileId)
+        content?.let { csvString ->
+            // Clear existing transactions before importing for full override effect
+            transactionViewModel.clearTransactionsForAccount(accountId)
+            parseAndImportCsv(ByteArrayInputStream(csvString.toByteArray()), accountId, categoryViewModel, transactionViewModel)
         }
     }
 }

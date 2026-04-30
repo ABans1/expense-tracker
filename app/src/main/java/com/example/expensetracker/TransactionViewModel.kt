@@ -24,6 +24,9 @@ class TransactionViewModel(private val transactionDao: TransactionDao) : ViewMod
     private val _remarkFilter = MutableStateFlow<String?>(null)
     val remarkFilter = _remarkFilter.asStateFlow()
 
+    private val _modeFilter = MutableStateFlow<String?>(null)
+    val modeFilter = _modeFilter.asStateFlow()
+
     private val _amountFilter = MutableStateFlow<Double?>(null)
     val amountFilter = _amountFilter.asStateFlow()
 
@@ -40,6 +43,9 @@ class TransactionViewModel(private val transactionDao: TransactionDao) : ViewMod
             }
             .combine(_remarkFilter) { transactions, remark ->
                 if (remark.isNullOrEmpty()) transactions else transactions.filter { it.remark.contains(remark, ignoreCase = true) }
+            }
+            .combine(_modeFilter) { transactions, mode ->
+                if (mode.isNullOrEmpty()) transactions else transactions.filter { it.mode.contains(mode, ignoreCase = true) }
             }
             .combine(_amountFilter) { transactions, amount ->
                 if (amount == null) transactions else transactions.filter { it.cashIn == amount || it.cashOut == amount }
@@ -65,6 +71,10 @@ class TransactionViewModel(private val transactionDao: TransactionDao) : ViewMod
         _remarkFilter.value = remark
     }
 
+    fun setModeFilter(mode: String?) {
+        _modeFilter.value = mode
+    }
+
     fun setAmountFilter(amount: Double?) {
         _amountFilter.value = amount
     }
@@ -74,6 +84,7 @@ class TransactionViewModel(private val transactionDao: TransactionDao) : ViewMod
         _startDate.value = null
         _endDate.value = null
         _remarkFilter.value = null
+        _modeFilter.value = null
         _amountFilter.value = null
     }
 

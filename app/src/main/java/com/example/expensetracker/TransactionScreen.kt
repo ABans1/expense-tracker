@@ -68,6 +68,7 @@ fun TransactionScreen(
     val startDate by transactionViewModel.startDate.collectAsState()
     val endDate by transactionViewModel.endDate.collectAsState()
     val remarkFilter by transactionViewModel.remarkFilter.collectAsState()
+    val modeFilter by transactionViewModel.modeFilter.collectAsState()
     val amountFilter by transactionViewModel.amountFilter.collectAsState()
 
     var editingTransaction by remember { mutableStateOf<Transaction?>(null) }
@@ -157,10 +158,11 @@ fun TransactionScreen(
 
             // Active Filters
             Row {
-                selectedCategory?.let { Text("Category: ${it.name}") }
-                startDate?.let { Text("From: ${SimpleDateFormat("dd/MM/yy", Locale.getDefault()).format(it)}") }
-                endDate?.let { Text("To: ${SimpleDateFormat("dd/MM/yy", Locale.getDefault()).format(it)}") }
-                remarkFilter?.let { Text("Remark: $it") }
+                selectedCategory?.let { Text("Category: ${it.name} | ") }
+                startDate?.let { Text("From: ${SimpleDateFormat("dd/MM/yy", Locale.getDefault()).format(it)} | ") }
+                endDate?.let { Text("To: ${SimpleDateFormat("dd/MM/yy", Locale.getDefault()).format(it)} | ") }
+                remarkFilter?.let { Text("Remark: $it | ") }
+                modeFilter?.let { Text("Mode: $it | ") }
                 amountFilter?.let { Text("Amount: $it") }
             }
 
@@ -219,7 +221,8 @@ fun TransactionScreen(
                         transactionViewModel.setCategoryFilter(it.first)
                         transactionViewModel.setDateRangeFilter(it.second, it.third)
                         transactionViewModel.setRemarkFilter(it.fourth)
-                        transactionViewModel.setAmountFilter(it.fifth)
+                        transactionViewModel.setModeFilter(it.fifth)
+                        transactionViewModel.setAmountFilter(it.sixth)
                         showFilterDialog = false
                     },
                     onClear = {
@@ -441,13 +444,14 @@ fun EditTransactionDialog(
 fun FilterDialog(
     categories: List<Category>,
     onDismiss: () -> Unit,
-    onApply: (Quintuple<Category?, Date?, Date?, String?, Double?>) -> Unit,
+    onApply: (Sextuple<Category?, Date?, Date?, String?, String?, Double?>) -> Unit,
     onClear: () -> Unit
 ) {
     var selectedCategory by remember { mutableStateOf<Category?>(null) }
     var startDate by remember { mutableStateOf<Date?>(null) }
     var endDate by remember { mutableStateOf<Date?>(null) }
     var remark by remember { mutableStateOf("") }
+    var mode by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
     val datePickerState = rememberDatePickerState()
@@ -486,6 +490,7 @@ fun FilterDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextField(value = remark, onValueChange = { remark = it }, label = { Text("Remark contains") })
+                TextField(value = mode, onValueChange = { mode = it }, label = { Text("Mode contains") })
                 TextField(value = amount, onValueChange = { amount = it }, label = { Text("Amount equals") })
                 ExposedDropdownMenuBox(
                     expanded = expanded,
@@ -538,7 +543,7 @@ fun FilterDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onApply(Quintuple(selectedCategory, startDate, endDate, remark, amount.toDoubleOrNull())) }) {
+            Button(onClick = { onApply(Sextuple(selectedCategory, startDate, endDate, remark, mode, amount.toDoubleOrNull())) }) {
                 Text("Apply")
             }
         },
@@ -608,4 +613,4 @@ fun MoveTransactionDialog(
     )
 }
 
-data class Quintuple<A, B, C, D, E>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E)
+data class Sextuple<A, B, C, D, E, F>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E, val sixth: F)
