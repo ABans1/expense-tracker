@@ -14,6 +14,9 @@ interface AccountDao {
     @Query("SELECT * FROM accounts")
     suspend fun getAllAccountsList(): List<Account>
 
+    @Query("SELECT * FROM accounts WHERE account_name = :name LIMIT 1")
+    suspend fun getAccountByName(name: String): Account?
+
     @Insert
     suspend fun insert(account: Account): Long
 

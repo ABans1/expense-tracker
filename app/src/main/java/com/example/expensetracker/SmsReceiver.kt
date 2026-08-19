@@ -23,7 +23,16 @@ class SmsReceiver : BroadcastReceiver() {
                     val appDatabase = (context.applicationContext as ExpenseTrackerApp).database
                     CoroutineScope(Dispatchers.IO).launch {
                         try {
-                            appDatabase.transactionDao().insert(transaction)
+                            val accountName = "SMS Transactions"
+                            val smsAccount = appDatabase.accountDao().getAccountByName(accountName)
+                            
+                            val accountId = if (smsAccount == null) {
+                                appDatabase.accountDao().insert(Account(name = accountName)).toInt()
+                            } else {
+                                smsAccount.id
+                            }
+                            
+                            appDatabase.transactionDao().insert(transaction.copy(accountId = accountId))
                         } finally {
                             pendingResult.finish()
                         }

@@ -73,6 +73,7 @@ fun TransactionScreen(
 
     var editingTransaction by remember { mutableStateOf<Transaction?>(null) }
     var movingTransaction by remember { mutableStateOf<Transaction?>(null) }
+    var transactionToDelete by remember { mutableStateOf<Transaction?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showFilterDialog by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
@@ -180,7 +181,7 @@ fun TransactionScreen(
                         transaction,
                         categories,
                         onEditClick = { editingTransaction = transaction },
-                        onDeleteClick = { transactionViewModel.deleteTransaction(transaction) },
+                        onDeleteClick = { transactionToDelete = transaction },
                         onMoveClick = { movingTransaction = transaction }
                     )
                     Divider()
@@ -243,6 +244,30 @@ fun TransactionScreen(
                     }
                 )
             }
+
+            if (transactionToDelete != null) {
+                AlertDialog(
+                    onDismissRequest = { transactionToDelete = null },
+                    title = { Text("Delete Transaction") },
+                    text = { Text("Are you sure you want to delete this transaction?") },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                transactionToDelete?.let { transactionViewModel.deleteTransaction(it) }
+                                transactionToDelete = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Delete")
+                        }
+                    },
+                    dismissButton = {
+                        Button(onClick = { transactionToDelete = null }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
         }
     }
 }
@@ -274,8 +299,15 @@ fun TransactionRow(
         Text(text = amount, color = color, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp))
 
         Row {
-            IconButton(onClick = onMoveClick) {
-                Icon(Icons.Default.SwapHoriz, contentDescription = "Move Transaction")
+            IconButton(
+                onClick = onMoveClick,
+                enabled = transaction.mode != "SMS"
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SwapHoriz, 
+                    contentDescription = "Move Transaction",
+                    tint = if (transaction.mode == "SMS") Color.LightGray else LocalContentColor.current
+                )
             }
             IconButton(onClick = onEditClick) {
                 Icon(Icons.Default.Edit, contentDescription = "Edit Transaction")

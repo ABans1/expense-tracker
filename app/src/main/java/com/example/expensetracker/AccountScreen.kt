@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -64,6 +65,7 @@ fun AccountScreen(
     
     val accounts by accountViewModel.accounts.collectAsState()
     var newAccountName by remember { mutableStateOf("") }
+    var accountToDelete by remember { mutableStateOf<Account?>(null) }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     
@@ -238,7 +240,16 @@ fun AccountScreen(
 
         LazyColumn(modifier = Modifier.weight(1f)) {
             items(accounts) { account ->
-                Row(modifier = Modifier.fillMaxWidth()) {
+                val isSmsAccount = account.name == "SMS Transactions"
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    if (isSmsAccount) {
+                        Icon(
+                            imageVector = Icons.Default.Email,
+                            contentDescription = "SMS Account",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 8.dp).size(20.dp)
+                        )
+                    }
                     Text(
                         text = account.name,
                         modifier = Modifier
@@ -246,16 +257,43 @@ fun AccountScreen(
                                 navController.navigate("transaction_screen/${account.id}")
                             }
                             .weight(1f)
-                            .padding(8.dp)
+                            .padding(8.dp),
+                        style = if (isSmsAccount) MaterialTheme.typography.bodyLarge.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) else MaterialTheme.typography.bodyLarge
                     )
                     IconButton(onClick = { navController.navigate("category_screen/${account.id}") }) {
                         Icon(Icons.Default.Settings, contentDescription = "Manage Categories")
                     }
-                    IconButton(onClick = { accountViewModel.deleteAccount(account) }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete Account")
+                    if (!isSmsAccount) {
+                        IconButton(onClick = { accountToDelete = account }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete Account")
+                        }
                     }
                 }
             }
+        }
+        
+        if (accountToDelete != null) {
+            AlertDialog(
+                onDismissRequest = { accountToDelete = null },
+                title = { Text("Delete Account") },
+                text = { Text("Are you sure you want to delete this account and all its transactions?") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            accountToDelete?.let { accountViewModel.deleteAccount(it) }
+                            accountToDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Delete")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = { accountToDelete = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
         Spacer(modifier = Modifier.height(16.dp))
         Row {
@@ -301,7 +339,7 @@ suspend fun autoRestore(
 ) {
     // 1. Get all CSV files from Drive and deduplicate by name (keeping only the latest version)
     val driveFiles = googleDriveService.listCsvFiles()
-        .filter { it.first.startsWith("ExpenseTracker ") }
+        .filter { it.first.startsWith("ExpenseTracker ") && !it.first.contains("_snapshot.csv") }
         .associateBy({ it.first }, { it.second }) // associates name to ID, duplicates naturally overwrite to the last one seen
 
     for ((fileName, fileId) in driveFiles) {

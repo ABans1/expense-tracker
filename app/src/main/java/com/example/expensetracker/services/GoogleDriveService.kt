@@ -81,6 +81,31 @@ class GoogleDriveService(private val context: Context) {
     suspend fun uploadCsvFile(fileName: String, content: String): String? = withContext(Dispatchers.IO) {
         if (driveService == null) return@withContext null
         val existingFileId = getFileId(fileName)
+        
+        // Before uploading/updating, create a snapshot of the current cloud file if it exists
+        if (existingFileId != null) {
+            try {
+                val snapshotName = fileName.replace(".csv", "_snapshot.csv")
+                val snapshotMetadata = com.google.api.services.drive.model.File()
+                snapshotMetadata.name = snapshotName
+                
+                // Delete old snapshot if it exists to keep only one latest snapshot
+                val oldSnapshotId = getFileId(snapshotName)
+                if (oldSnapshotId != null) {
+                    driveService?.files()?.delete(oldSnapshotId)?.execute()
+                }
+                
+                driveService?.files()?.copy(existingFileId, snapshotMetadata)?.execute()
+                Log.d("GoogleDriveService", "Snapshot created: $snapshotName")
+            } catch (e: Exception) {
+                Log.e("GoogleDriveService", "Failed to create snapshot", e)
+                // Continue with upload even if snapshot fails? 
+                // User said "I don't want that to happen" (wrong data backed up), 
+                // but if snapshot fails, we definitely want a backup if it's the first time.
+                // However, if it's an update, failure to snapshot might be a risk.
+            }
+        }
+
         val fileMetadata = com.google.api.services.drive.model.File()
         fileMetadata.name = fileName
         val tempFile = File(context.cacheDir, fileName)

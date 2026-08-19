@@ -10,6 +10,9 @@ interface CategoryDao {
     @Query("SELECT * FROM categories WHERE account_id = :accountId ORDER BY name ASC")
     fun getCategoriesForAccount(accountId: Int): Flow<List<Category>>
 
+    @Query("SELECT * FROM categories WHERE account_id = :accountId")
+    suspend fun getCategoriesList(accountId: Int): List<Category>
+
     @Insert
     suspend fun insert(category: Category): Long
 
