@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
@@ -82,6 +83,17 @@ fun AccountScreen(
         )
     }
     
+    var hasNotificationPermission by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+            } else true
+        )
+    }
+
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
         onResult = { result ->
@@ -119,6 +131,14 @@ fun AccountScreen(
             hasSmsPermission = isGranted
         }
     )
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            hasNotificationPermission = isGranted
+        }
+    )
+
     val lifecycleOwner = LocalLifecycleOwner.current
 
     DisposableEffect(lifecycleOwner) {
@@ -128,6 +148,13 @@ fun AccountScreen(
                     context,
                     Manifest.permission.RECEIVE_SMS
                 ) == PackageManager.PERMISSION_GRANTED
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    hasNotificationPermission = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS
+                    ) == PackageManager.PERMISSION_GRANTED
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -191,8 +218,12 @@ fun AccountScreen(
                             coroutineScope.launch {
                                 isSyncing = true
                                 try {
-                                    autoBackup(googleDriveService, accountViewModel, transactionViewModel, categoryViewModel)
-                                    Toast.makeText(context, "Sync Successful", Toast.LENGTH_SHORT).show()
+                                    val success = autoBackup(googleDriveService, accountViewModel, transactionViewModel, categoryViewModel)
+                                    if (success) {
+                                        Toast.makeText(context, "Sync Successful", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Sync Failed: One or more files could not be uploaded", Toast.LENGTH_LONG).show()
+                                    }
                                 } catch (e: Exception) {
                                     Log.e("AccountScreen", "Sync Failed", e)
                                     Toast.makeText(context, "Sync Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
@@ -233,6 +264,13 @@ fun AccountScreen(
         } else {
             Button(onClick = { smsPermissionLauncher.launch(Manifest.permission.RECEIVE_SMS) }) {
                 Text("Enable SMS Reading")
+            }
+        }
+
+        if (!hasNotificationPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
+                Text("Enable Sync Notifications")
             }
         }
         
@@ -321,14 +359,19 @@ suspend fun autoBackup(
     accountViewModel: AccountViewModel,
     transactionViewModel: TransactionViewModel,
     categoryViewModel: CategoryViewModel
-) {
+): Boolean {
     val accounts = accountViewModel.getAllAccounts()
+    var allSuccessful = true
     for (account in accounts) {
         val transactions = transactionViewModel.getAllTransactions(account.id)
         val categories = categoryViewModel.getCategories(account.id).first()
         val csvContent = generateCsvContent(transactions, categories)
-        googleDriveService.uploadCsvFile("ExpenseTracker ${account.name}.csv", csvContent)
+        val fileId = googleDriveService.uploadCsvFile("ExpenseTracker ${account.name}.csv", csvContent)
+        if (fileId == null) {
+            allSuccessful = false
+        }
     }
+    return allSuccessful
 }
 
 suspend fun autoRestore(
