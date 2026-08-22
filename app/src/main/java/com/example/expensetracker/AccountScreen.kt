@@ -220,13 +220,14 @@ fun AccountScreen(
                                 try {
                                     val result = autoBackup(googleDriveService, accountViewModel, transactionViewModel, categoryViewModel)
                                     if (result.first) {
-                                        Toast.makeText(context, "Sync Success (v3)", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Sync Success (v4)", Toast.LENGTH_SHORT).show()
                                     } else {
-                                        Toast.makeText(context, "Sync Error (v3): ${result.second}", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(context, "Sync Error (v4): ${result.second}", Toast.LENGTH_LONG).show()
                                     }
                                 } catch (e: Exception) {
                                     Log.e("AccountScreen", "Sync Failed", e)
-                                    Toast.makeText(context, "Sync Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                    val errorMsg = e.message ?: e.localizedMessage ?: e.javaClass.simpleName
+                                    Toast.makeText(context, "Sync Crash: $errorMsg", Toast.LENGTH_LONG).show()
                                 } finally {
                                     isSyncing = false
                                 }
@@ -363,18 +364,28 @@ suspend fun autoBackup(
     val accounts = accountViewModel.getAllAccounts()
     if (accounts.isEmpty()) return Pair(true, "No accounts to sync")
     
+    val failedBooks = mutableListOf<String>()
+    
     for (account in accounts) {
-        val transactions = transactionViewModel.getAllTransactions(account.id)
-        val categories = categoryViewModel.getCategories(account.id).first()
-        val csvContent = generateCsvContent(transactions, categories)
         try {
+            val transactions = transactionViewModel.getAllTransactions(account.id)
+            val categories = categoryViewModel.getCategories(account.id).first()
+            val csvContent = generateCsvContent(transactions, categories)
+            
+            Log.d("AccountScreen", "Syncing ${account.name} with ${transactions.size} rows")
             googleDriveService.uploadCsvFile("ExpenseTracker ${account.name}.csv", csvContent)
         } catch (e: Exception) {
             Log.e("AccountScreen", "Sync failed for ${account.name}", e)
-            return Pair(false, "${account.name}: ${e.localizedMessage}")
+            val errorMsg = e.message ?: e.localizedMessage ?: e.javaClass.simpleName
+            failedBooks.add("${account.name} ($errorMsg)")
         }
     }
-    return Pair(true, "")
+    
+    return if (failedBooks.isEmpty()) {
+        Pair(true, "")
+    } else {
+        Pair(false, failedBooks.joinToString(", "))
+    }
 }
 
 suspend fun autoRestore(

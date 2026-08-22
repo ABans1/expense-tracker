@@ -24,7 +24,6 @@ class SyncWorker(
 
         if (googleSignInAccount == null) {
             Log.d("SyncWorker", "User not signed in, skipping auto-sync")
-            // No notification here to avoid bothering the user if they never signed in
             return Result.success()
         }
 
@@ -35,34 +34,35 @@ class SyncWorker(
 
         return try {
             val accounts = accountDao.getAllAccountsList()
-            var allSuccessful = true
-            var failReason = ""
+            val failedAccounts = mutableListOf<String>()
             
             for (account in accounts) {
-                val transactions = transactionDao.getTransactionsForAccountList(account.id)
-                val categories = categoryDao.getCategoriesList(account.id)
-                val csvContent = generateCsvContent(transactions, categories)
-                val fileId = googleDriveService.uploadCsvFile("ExpenseTracker ${account.name}.csv", csvContent)
-                
-                if (fileId == null) {
-                    allSuccessful = false
-                    failReason = "Upload failed for ${account.name}"
-                    Log.e("SyncWorker", "Upload failed for ${account.name}")
+                try {
+                    val transactions = transactionDao.getTransactionsForAccountList(account.id)
+                    val categories = categoryDao.getCategoriesList(account.id)
+                    val csvContent = generateCsvContent(transactions, categories)
+                    googleDriveService.uploadCsvFile("ExpenseTracker ${account.name}.csv", csvContent)
+                } catch (e: Exception) {
+                    Log.e("SyncWorker", "Failed to sync ${account.name}", e)
+                    val errorMsg = e.message ?: e.localizedMessage ?: e.javaClass.simpleName
+                    failedAccounts.add("${account.name} ($errorMsg)")
                 }
             }
             
-            if (allSuccessful) {
+            if (failedAccounts.isEmpty()) {
                 Log.d("SyncWorker", "Auto-sync completed successfully")
                 showNotification("Cloud Backup", "Backup completed successfully")
                 Result.success()
             } else {
-                Log.e("SyncWorker", "Auto-sync failed: $failReason")
-                showNotification("Cloud Backup", "Backup failed: $failReason. Will retry later.")
+                val errorSummary = failedAccounts.joinToString(", ")
+                Log.e("SyncWorker", "Auto-sync partially failed: $errorSummary")
+                showNotification("Cloud Backup", "Backup failed for: $errorSummary")
                 Result.retry()
             }
         } catch (e: Exception) {
-            Log.e("SyncWorker", "Auto-sync failed with exception", e)
-            showNotification("Cloud Backup", "Backup failed: ${e.localizedMessage}")
+            Log.e("SyncWorker", "Auto-sync fatal error", e)
+            val fatalMsg = e.message ?: e.localizedMessage ?: e.javaClass.simpleName
+            showNotification("Cloud Backup", "Backup fatal error: $fatalMsg")
             Result.retry()
         }
     }
@@ -70,14 +70,13 @@ class SyncWorker(
     private fun showNotification(title: String, content: String) {
         try {
             val builder = NotificationCompat.Builder(applicationContext, "sync_channel")
-                .setSmallIcon(R.drawable.ic_launcher_foreground) // Using foreground icon as fallback
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle(title)
                 .setContentText(content)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setAutoCancel(true)
 
             with(NotificationManagerCompat.from(applicationContext)) {
-                // notificationId is a unique int for each notification that you must define
                 notify(1001, builder.build())
             }
         } catch (e: SecurityException) {
