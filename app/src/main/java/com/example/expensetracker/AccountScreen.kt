@@ -220,9 +220,9 @@ fun AccountScreen(
                                 try {
                                     val result = autoBackup(googleDriveService, accountViewModel, transactionViewModel, categoryViewModel)
                                     if (result.first) {
-                                        Toast.makeText(context, "Sync Success (v2)", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Sync Success (v3)", Toast.LENGTH_SHORT).show()
                                     } else {
-                                        Toast.makeText(context, "Sync Failed (v2): ${result.second}", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(context, "Sync Error (v3): ${result.second}", Toast.LENGTH_LONG).show()
                                     }
                                 } catch (e: Exception) {
                                     Log.e("AccountScreen", "Sync Failed", e)
@@ -368,12 +368,10 @@ suspend fun autoBackup(
         val categories = categoryViewModel.getCategories(account.id).first()
         val csvContent = generateCsvContent(transactions, categories)
         try {
-            val fileId = googleDriveService.uploadCsvFile("ExpenseTracker ${account.name}.csv", csvContent)
-            if (fileId == null) {
-                return Pair(false, "Failed to upload ${account.name}")
-            }
+            googleDriveService.uploadCsvFile("ExpenseTracker ${account.name}.csv", csvContent)
         } catch (e: Exception) {
-            return Pair(false, "Error uploading ${account.name}: ${e.localizedMessage}")
+            Log.e("AccountScreen", "Sync failed for ${account.name}", e)
+            return Pair(false, "${account.name}: ${e.localizedMessage}")
         }
     }
     return Pair(true, "")
