@@ -218,11 +218,11 @@ fun AccountScreen(
                             coroutineScope.launch {
                                 isSyncing = true
                                 try {
-                                    val success = autoBackup(googleDriveService, accountViewModel, transactionViewModel, categoryViewModel)
-                                    if (success) {
-                                        Toast.makeText(context, "Sync Successful", Toast.LENGTH_SHORT).show()
+                                    val result = autoBackup(googleDriveService, accountViewModel, transactionViewModel, categoryViewModel)
+                                    if (result.first) {
+                                        Toast.makeText(context, "Sync Success (v2)", Toast.LENGTH_SHORT).show()
                                     } else {
-                                        Toast.makeText(context, "Sync Failed: One or more files could not be uploaded", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(context, "Sync Failed (v2): ${result.second}", Toast.LENGTH_LONG).show()
                                     }
                                 } catch (e: Exception) {
                                     Log.e("AccountScreen", "Sync Failed", e)
@@ -359,19 +359,24 @@ suspend fun autoBackup(
     accountViewModel: AccountViewModel,
     transactionViewModel: TransactionViewModel,
     categoryViewModel: CategoryViewModel
-): Boolean {
+): Pair<Boolean, String> {
     val accounts = accountViewModel.getAllAccounts()
-    var allSuccessful = true
+    if (accounts.isEmpty()) return Pair(true, "No accounts to sync")
+    
     for (account in accounts) {
         val transactions = transactionViewModel.getAllTransactions(account.id)
         val categories = categoryViewModel.getCategories(account.id).first()
         val csvContent = generateCsvContent(transactions, categories)
-        val fileId = googleDriveService.uploadCsvFile("ExpenseTracker ${account.name}.csv", csvContent)
-        if (fileId == null) {
-            allSuccessful = false
+        try {
+            val fileId = googleDriveService.uploadCsvFile("ExpenseTracker ${account.name}.csv", csvContent)
+            if (fileId == null) {
+                return Pair(false, "Failed to upload ${account.name}")
+            }
+        } catch (e: Exception) {
+            return Pair(false, "Error uploading ${account.name}: ${e.localizedMessage}")
         }
     }
-    return allSuccessful
+    return Pair(true, "")
 }
 
 suspend fun autoRestore(

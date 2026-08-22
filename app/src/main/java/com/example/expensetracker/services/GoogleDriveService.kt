@@ -18,7 +18,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.IOException
 import java.util.Collections
 
 class GoogleDriveService(private val context: Context) {
@@ -41,15 +40,20 @@ class GoogleDriveService(private val context: Context) {
     }
 
     private fun setupDriveService(googleAccount: GoogleSignInAccount) {
-        val credential = GoogleAccountCredential.usingOAuth2(
-            context, Collections.singleton(DriveScopes.DRIVE_FILE)
-        )
-        credential.selectedAccount = googleAccount.account
-        driveService = Drive.Builder(
-            NetHttpTransport(),
-            GsonFactory.getDefaultInstance(),
-            credential
-        ).setApplicationName("ExpenseTracker").build()
+        try {
+            val credential = GoogleAccountCredential.usingOAuth2(
+                context, Collections.singleton(DriveScopes.DRIVE_FILE)
+            )
+            credential.selectedAccount = googleAccount.account
+            driveService = Drive.Builder(
+                NetHttpTransport(),
+                GsonFactory.getDefaultInstance(),
+                credential
+            ).setApplicationName("ExpenseTracker").build()
+            Log.d("GoogleDriveService", "Drive service setup successful for ${googleAccount.email}")
+        } catch (e: Exception) {
+            Log.e("GoogleDriveService", "Failed to setup Drive service", e)
+        }
     }
 
     fun getSignInIntent(): Intent {
@@ -63,7 +67,7 @@ class GoogleDriveService(private val context: Context) {
             setupDriveService(account)
             onSignedIn(account)
         } catch (e: ApiException) {
-            Log.e("GoogleDriveService", "Sign-in failed! Status Code: ${e.statusCode}. Message: ${e.message}")
+            Log.e("GoogleDriveService", "Sign-in failed! Code: ${e.statusCode}")
             onError(e)
         }
     }
@@ -78,35 +82,35 @@ class GoogleDriveService(private val context: Context) {
     }
 
     suspend fun uploadCsvFile(fileName: String, content: String): String? = withContext(Dispatchers.IO) {
-        if (driveService == null) {
-            Log.e("GoogleDriveService", "Upload failed: driveService is null (user not signed in?)")
+        val service = driveService
+        if (service == null) {
+            Log.e("GoogleDriveService", "Upload failed: Drive service is null")
             return@withContext null
         }
-        
-        // Sanitize filename for local storage (remove slashes, etc.)
-        val safeLocalName = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
         
         val existingFileId = getFileId(fileName)
         Log.d("GoogleDriveService", "Uploading $fileName. Existing ID: $existingFileId")
         
-        val fileMetadata = com.google.api.services.drive.model.File()
-        fileMetadata.name = fileName
-        val tempFile = File(context.cacheDir, safeLocalName)
+        val localFileName = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        val tempFile = File(context.cacheDir, localFileName)
         tempFile.writeText(content)
         val mediaContent = com.google.api.client.http.FileContent("text/csv", tempFile)
 
-        try {
-            val file = if (existingFileId != null) {
-                Log.d("GoogleDriveService", "Updating existing file: $fileName ($existingFileId)")
-                // Using an empty file object for metadata during update is more reliable
-                val updateMetadata = com.google.api.services.drive.model.File()
-                driveService?.files()?.update(existingFileId, updateMetadata, mediaContent)?.execute()
+        return@withContext try {
+            if (existingFileId != null) {
+                // Pass an empty file object instead of null to be safer
+                val metadata = com.google.api.services.drive.model.File()
+                val updatedFile = service.files().update(existingFileId, metadata, mediaContent).execute()
+                Log.d("GoogleDriveService", "File updated successfully: ${updatedFile.id}")
+                updatedFile.id
             } else {
-                Log.d("GoogleDriveService", "Creating new file: $fileName")
-                driveService?.files()?.create(fileMetadata, mediaContent)?.execute()
+                val fileMetadata = com.google.api.services.drive.model.File().apply {
+                    name = fileName
+                }
+                val createdFile = service.files().create(fileMetadata, mediaContent).execute()
+                Log.d("GoogleDriveService", "File created successfully: ${createdFile.id}")
+                createdFile.id
             }
-            Log.d("GoogleDriveService", "Upload success: ${file?.id}")
-            file?.id
         } catch (e: Exception) {
             Log.e("GoogleDriveService", "Upload failed for $fileName: ${e.message}", e)
             null
@@ -114,41 +118,42 @@ class GoogleDriveService(private val context: Context) {
     }
 
     suspend fun listCsvFiles(): List<Pair<String, String>> = withContext(Dispatchers.IO) {
-        if (driveService == null) return@withContext emptyList()
+        val service = driveService ?: return@withContext emptyList()
         try {
-            val files = driveService?.files()?.list()
-                ?.setQ("mimeType='text/csv'")
-                ?.setSpaces("drive")
-                ?.execute()?.files
-            files?.map { it.name to it.id } ?: emptyList()
-        } catch (e: IOException) {
+            val result = service.files().list()
+                .setQ("name contains 'ExpenseTracker' and trashed = false")
+                .setSpaces("drive")
+                .execute()
+            result.files?.map { it.name to it.id } ?: emptyList()
+        } catch (e: Exception) {
+            Log.e("GoogleDriveService", "List failed", e)
             emptyList()
         }
     }
 
     suspend fun downloadFile(fileId: String): String? = withContext(Dispatchers.IO) {
-        if (driveService == null) return@withContext null
+        val service = driveService ?: return@withContext null
         try {
             val outputStream = ByteArrayOutputStream()
-            driveService?.files()?.get(fileId)?.executeMediaAndDownloadTo(outputStream)
+            service.files().get(fileId).executeMediaAndDownloadTo(outputStream)
             outputStream.toString()
-        } catch (e: IOException) {
+        } catch (e: Exception) {
+            Log.e("GoogleDriveService", "Download failed", e)
             null
         }
     }
 
     private suspend fun getFileId(fileName: String): String? = withContext(Dispatchers.IO) {
-        if (driveService == null) return@withContext null
+        val service = driveService ?: return@withContext null
         try {
-            // Escape single quotes in the filename for the Drive query
             val escapedName = fileName.replace("'", "\\'")
-            val result = driveService?.files()?.list()
-                ?.setQ("mimeType='text/csv' and name='$escapedName' and trashed = false")
-                ?.setSpaces("drive")
-                ?.execute()
-            val files = result?.files
-            Log.d("GoogleDriveService", "getFileId for $fileName found ${files?.size ?: 0} files")
-            files?.firstOrNull()?.id
+            val result = service.files().list()
+                .setQ("mimeType='text/csv' and name='$escapedName' and trashed = false")
+                .setSpaces("drive")
+                .execute()
+            val fileId = result.files?.firstOrNull()?.id
+            Log.d("GoogleDriveService", "Found file ID for $fileName: $fileId")
+            fileId
         } catch (e: Exception) {
             Log.e("GoogleDriveService", "getFileId failed for $fileName", e)
             null
